@@ -173,7 +173,7 @@ def calc_accuracy(model, data, labels):
         x = data[i,:,:,:]
         x = x.unsqueeze(0)
         acc.append((model(x).argmax(axis=1) == labels[i]).float())
-    return torch.mean(torch.Tensor(acc))
+    return acc
 
 
 #load dataset
@@ -216,7 +216,7 @@ for batch in dataloader:
         te_d = test_batch[i,:,:,:,:]
         te_l = test_labels[i,:]
         loss.append(train_steps(model, tr_d, tr_l, loss_fc, opt_fc).float())
-        acc.append(calc_accuracy(model, te_d, te_l).float())
+        acc.append(calc_accuracy(model, te_d, te_l))
     batch_loss = torch.mean(torch.Tensor(loss))
     batch_acc = torch.mean(torch.Tensor(acc))
     cnt += 1
