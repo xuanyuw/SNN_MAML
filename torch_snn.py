@@ -219,6 +219,7 @@ for batch in dataloader:
         acc.append(calc_accuracy(model, te_d, te_l).float())
     batch_loss = torch.mean(torch.Tensor(loss))
     batch_acc = torch.mean(torch.Tensor(acc))
+    cnt += 1
     #if cnt % 100 == 0:
     print('batch #{}'.format(cnt))
     print('loss = {}'.format(batch_loss))
