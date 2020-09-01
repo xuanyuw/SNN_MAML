@@ -10,7 +10,7 @@ from torchvision.transforms import Grayscale, Compose, ToTensor
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--n_epochs', type=int,default=500)
-parser.add_argument('--batch_size', type=int,default=72)
+parser.add_argument('--batch_size', type=int,default=16)
 parser.add_argument('--n_ways', type=int,default=5)
 parser.add_argument('--n_shot', type=int,default=1)
 parser.add_argument("--train", dest="train", action="store_true")
@@ -55,9 +55,11 @@ tau_mem = 100 # time-constant of membrane potential
 leak = np.exp(-(1 / tau_mem))
 
 class Spike_generator(torch.autograd.Function):
+    @staticmethod
     def forward(self, input):
         self.save_for_backward(input)
-        return input.gt(0)
+        return input.gt(0).float()
+    @staticmethod
     def backward(self, grad_output):
         input, = self.saved_tensors
         grad_input = grad_output.clone()
@@ -68,18 +70,18 @@ def LIF_neuron(v_mem, threshold=conv_threshold, leak=leak):
     # approximate LIF using IF first
     exceed_vmem = nn.functional.threshold(v_mem, threshold, 0)
     v_mem = v_mem - exceed_vmem #reset the neurons that already fired
-    spike = Spike_generator()(exceed_vmem)
+    spike = Spike_generator.apply(exceed_vmem)
     #add in leak effect (leak when forward, no leak in backprop)
     v_mem = leak * v_mem.detach() + v_mem - v_mem.detach() 
     #approx partial aLIF with respect to net = 1/v_threshold
-    spike = spike.detach() + torch.div(spike, threshold) - torch.div(spike, threshold).detach()
+    spike = spike.detach() + torch.true_divide(spike, threshold) - torch.true_divide(spike, threshold).detach()
     return v_mem, spike
 
 def pooling_neuron(v_mem, threshold=pooling_threshold):
     # no leak in pooling layer
     exceed_vmem = nn.functional.threshold(v_mem, threshold, 0)
     v_mem = v_mem - exceed_vmem #reset the neurons that already fired
-    spike = Spike_generator()(exceed_vmem)
+    spike = Spike_generator.apply(exceed_vmem)
     return v_mem, spike
 
 class Network(nn.Module):
@@ -117,17 +119,17 @@ class Network(nn.Module):
                                           int(img_size/pooling_size)), requires_grad=False)
         vmem_pool2 = Variable(torch.zeros(input.size(0), conv2_out_channel, out_size, out_size),
                                           requires_grad=False)
-        vmem_fc1 = Variable(torch.zeros(input.size(0), out_size), requires_grad=False)
+        vmem_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
         vmem_fc2 = Variable(torch.zeros(input.size(0), numcat))
 
         #generate Poisson-distributed spikes
         rand_num = torch.rand(tuple(input.shape))
         poisson_spk = torch.abs(input / 2) > rand_num
-        poisson_spk = poisson_spk.int()
+        poisson_spk = poisson_spk.float()
 
         for i in range(steps):
             # conv layer 1
-            vmem_conv1 = vmem_conv1 + self.conv1(poisson_spk)
+            vmem_conv1 = vmem_conv1 + self.conv1(poisson_spk).int()
             vmem_conv1, spk = LIF_neuron(vmem_conv1)
 
             # pooling layer 1
@@ -168,7 +170,9 @@ def calc_accuracy(model, data, labels):
     model.eval()
     acc = []
     for i in range(len(labels)):
-        acc += (model(data[i,:,:,:]).argmax(axis=1) == labels[i]).float()
+        x = data[i,:,:,:]
+        x = x.unsqueeze(0)
+        acc.append((model(x).argmax(axis=1) == labels[i]).float())
     return torch.mean(torch.Tensor(acc))
 
 
@@ -182,52 +186,40 @@ model = Network()
 loss_fc = torch.nn.CrossEntropyLoss()
 opt_fc = torch.optim.SGD(model.parameters(), lr=1e-3)
 
-iter_loader=iter(dataloader)
-batch = next(iter_loader)
-train_batch, train_labels = batch['train']
-test_batch, test_labels = batch['test']
-loss = 0
-acc=0
-for i in range(batch_size):
-    tr_d = train_batch[1,:,:,:,:]
-    tr_d = tr_d.view(train_batch.size(1), train_batch.size(2),
-                                train_batch.size(3), train_batch.size(4))
-    tr_l = train_labels[i,:]
-    tr_l = tr_l.view(-1)
-    te_d = test_batch[i,:,:,:,:]
-    te_d = te_d.view(test_batch.size(1), test_batch.size(2),
-                                test_batch.size(3), test_batch.size(4))
-    te_l = test_labels[i,:]
-    te_l = te_l.view(-1)
-    loss = train_steps(model, tr_d, tr_l, loss_fc, opt_fc)
-    acc = calc_accuracy(model, te_d, te_l)
-print('batch test')
-print('loss = {}'.format(loss))
-print('acc = {}'.format(acc))
+#iter_loader=iter(dataloader)
+#batch = next(iter_loader)
+#train_batch, train_labels = batch['train']
+#test_batch, test_labels = batch['test']
+#loss = 0
+#acc=0
+#for i in range(batch_size):
+#    tr_d = train_batch[1,:,:,:,:]
+#    tr_l = train_labels[i,:]
+#    te_d = test_batch[i,:,:,:,:]
+#    te_l = test_labels[i,:]
+#    loss = train_steps(model, tr_d, tr_l, loss_fc, opt_fc)
+#    acc = calc_accuracy(model, te_d, te_l)
+#    print('batch test #{}'.format(i))
+#    print('loss = {}'.format(loss))
+#    print('acc = {}'.format(acc))
 
 # meta learning 
-#cnt = 0
-#for batch in dataloader:
-#    train_batch, train_labels = batch['train']
-#    test_batch, test_labels = batch['test']
-#    loss = 0
-#    acc = 0
-#    for i in range(batch_size):
-#        tr_d = train_batch[i,:,:,:,:]
-#        tr_d = tr_d.view(train_batch.size(1), train_batch.size(2),
-#                                    train_batch.size(3), train_batch.size(4))
-#        tr_l = train_labels[i,:]
-#        tr_l = tr_l.view(-1)
-#
-#        te_d = test_batch[i,:,:,:,:]
-#        te_d = te_d.view(test_batch.size(1), test_batch.size(2),
-#                                    test_batch.size(3), test_batch.size(4))
-#        te_l = test_labels[i,:]
-#        te_l = te_l.view(-1)
-#
-#        loss = train_steps(model, tr_d, tr_l, loss_fc, opt_fc)
-#        acc = calc_accuracy(model, te_d, te_l)
-#    if cnt % 100 == 0:
-#        print('batch #{}'.format(cnt))
-#        print('loss = {}'.format(loss))
-#        print('acc = {}'.format(acc))
+cnt = 0
+for batch in dataloader:
+    train_batch, train_labels = batch['train']
+    test_batch, test_labels = batch['test']
+    loss = []
+    acc = []
+    for i in range(batch_size):
+        tr_d = train_batch[1,:,:,:,:]
+        tr_l = train_labels[i,:]
+        te_d = test_batch[i,:,:,:,:]
+        te_l = test_labels[i,:]
+        loss.append(train_steps(model, tr_d, tr_l, loss_fc, opt_fc).float())
+        acc.append(calc_accuracy(model, te_d, te_l).float())
+    batch_loss = torch.mean(torch.Tensor(loss))
+    batch_acc = torch.mean(torch.Tensor(acc))
+    #if cnt % 100 == 0:
+    print('batch #{}'.format(cnt))
+    print('loss = {}'.format(batch_loss))
+    print('acc = {}'.format(batch_acc))
