@@ -11,5 +11,5 @@ test_dataloader = BatchMetaDataLoader(test_dataset, batch_size=16, num_workers=4
 #    print('label shape = {}'.format(label.shape)
 
 iter_loader = iter(test_dataloader)
-input, label = next(iter_loader)['test']
+input, label = next(iter_loader)['val']
 print(tuple(input.shape))

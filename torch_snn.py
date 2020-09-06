@@ -10,7 +10,7 @@ from torchvision.transforms import Grayscale, Compose, ToTensor
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--n_epochs', type=int,default=500)
-parser.add_argument('--batch_size', type=int,default=16)
+parser.add_argument('--batch_size', type=int,default=72)
 parser.add_argument('--n_ways', type=int,default=5)
 parser.add_argument('--n_shot', type=int,default=1)
 parser.add_argument("--train", dest="train", action="store_true")
@@ -39,7 +39,7 @@ kernel_size = 5
 pooling_size = 2
 conv_stride = 1
 pooling_stride = 2
-conv_size = int((64 - kernel_size) / conv_stride) + 1
+#conv_size = int((64 - kernel_size) / conv_stride) + 1
 conv1_out_channel = 20
 conv2_out_channel = 50
 out_size = int(img_size/(pooling_size * pooling_size))
@@ -172,7 +172,7 @@ def calc_accuracy(model, data, labels):
     for i in range(len(labels)):
         x = data[i,:,:,:]
         x = x.unsqueeze(0)
-        acc.append((model(x).argmax(axis=1) == labels[i]).float())
+        acc.append((model(x).argmax(axis=1) == labels[i]).float().numpy())
     return acc
 
 
@@ -180,12 +180,14 @@ def calc_accuracy(model, data, labels):
 dataset = doublemnist("data", ways=n_ways, shots=n_shot, test_shots=test_shots,
                         meta_train=True, transform=Compose([Grayscale(), ToTensor()]),
                         download=True)
+
 dataloader = BatchMetaDataLoader(dataset, batch_size=batch_size, num_workers=4)
 
 model = Network()
 loss_fc = torch.nn.CrossEntropyLoss()
 opt_fc = torch.optim.SGD(model.parameters(), lr=1e-3)
 
+#small test
 #iter_loader=iter(dataloader)
 #batch = next(iter_loader)
 #train_batch, train_labels = batch['train']
@@ -198,14 +200,19 @@ opt_fc = torch.optim.SGD(model.parameters(), lr=1e-3)
 #    te_d = test_batch[i,:,:,:,:]
 #    te_l = test_labels[i,:]
 #    loss = train_steps(model, tr_d, tr_l, loss_fc, opt_fc)
-#    acc = calc_accuracy(model, te_d, te_l)
+#    acc = np.mean(calc_accuracy(model, te_d, te_l))
+#
 #    print('batch test #{}'.format(i))
 #    print('loss = {}'.format(loss))
 #    print('acc = {}'.format(acc))
 
 # meta learning 
-cnt = 0
-for batch in dataloader:
+cnt=0
+iter_loader=iter(dataloader)
+for cnt in range(100):
+    batch = next(iter_loader)
+    cnt += 1
+#for batch in dataloader:
     train_batch, train_labels = batch['train']
     test_batch, test_labels = batch['test']
     loss = []
@@ -220,7 +227,7 @@ for batch in dataloader:
     batch_loss = torch.mean(torch.Tensor(loss))
     batch_acc = torch.mean(torch.Tensor(acc))
     cnt += 1
-    #if cnt % 100 == 0:
-    print('batch #{}'.format(cnt))
-    print('loss = {}'.format(batch_loss))
-    print('acc = {}'.format(batch_acc))
+    if cnt % 10 == 0:
+        print('batch #{}'.format(cnt))
+        print('loss = {}'.format(batch_loss))
+        print('acc = {}'.format(batch_acc))
