@@ -63,6 +63,8 @@ class Spike_generator(torch.autograd.Function):
     def backward(self, grad_output):
         input, = self.saved_tensors
         grad_input = grad_output.clone()
+        #If a hidden neuron does not fire any spike, the derivative of corresponding neuronal
+        # activation is set to zero
         grad_input[input < 0] = 0
         return grad_input
 
@@ -73,7 +75,7 @@ def LIF_neuron(v_mem, threshold=conv_threshold, leak=leak):
     spike = Spike_generator.apply(exceed_vmem)
     #add in leak effect (leak when forward, no leak in backprop)
     v_mem = leak * v_mem.detach() + v_mem - v_mem.detach() 
-    #approx partial aLIF with respect to net = 1/v_threshold
+    #approx partial aIF with respect to net = 1/v_threshold
     spike = spike.detach() + torch.true_divide(spike, threshold) - torch.true_divide(spike, threshold).detach()
     return v_mem, spike
 
@@ -83,6 +85,14 @@ def pooling_neuron(v_mem, threshold=pooling_threshold):
     v_mem = v_mem - exceed_vmem #reset the neurons that already fired
     spike = Spike_generator.apply(exceed_vmem)
     return v_mem, spike
+
+def layer_outputs(leak, out, total_out, leak_out, out_history):
+    # get output of each layer for gradient approximation
+    total_out = total_out + out
+    leak_out = leak_out + out * leak
+    out_history.append(out)
+    return total_out, leak_out, out_history
+
 
 class Network(nn.Module):
     def __init__(self, n_ways=n_ways, img_size=img_size):
@@ -112,7 +122,7 @@ class Network(nn.Module):
 
     def forward(self, input, steps=tau_mem, leak=leak):
         vmem_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
-                             requires_grad = False)
+                             requires_grad=False)
         vmem_pool1 = Variable(torch.zeros(input.size(0), conv1_out_channel, int(img_size/pooling_size), 
                                           int(img_size/pooling_size)), requires_grad=False)
         vmem_conv2 = Variable(torch.zeros(input.size(0), conv2_out_channel, int(img_size/pooling_size),
@@ -122,23 +132,50 @@ class Network(nn.Module):
         vmem_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
         vmem_fc2 = Variable(torch.zeros(input.size(0), numcat))
 
+        total_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
+                             requires_grad=False)
+        leak_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
+                             requires_grad=False)
+        total_out_conv2 = Variable(torch.zeros(input.size(0), conv2_out_channel, int(img_size/pooling_size),
+                                          int(img_size/pooling_size)), requires_grad=False)
+        leak_out_conv2 = Variable(torch.zeros(input.size(0), conv2_out_channel, int(img_size/pooling_size),
+                                          int(img_size/pooling_size)), requires_grad=False)
+        total_out_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
+        leak_out_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
+        out_history_conv1 = []
+        out_history_conv2 = []
+        out_history_fc1 = []
+
         #generate Poisson-distributed spikes
         rand_num = torch.rand(tuple(input.shape))
         poisson_spk = torch.abs(input / 2) > rand_num
         poisson_spk = poisson_spk.float()
 
+        # masks for drop-out
+        drop_prob = 0.2
+        mask_conv1 = np.random.choice([0, 1], size=(input.size(0), conv1_out_channel, img_size, img_size),
+                                        p = [drop_prob, 1-drop_prob])
+        mask_conv2 = np.random.choice([0, 1], size=(input.size(0), conv1_out_channel,
+                                                    int(img_size/pooling_size), int(img_size/pooling_size)),
+                                        p=[drop_prob, 1 - drop_prob])
+        mask_fc1 = np.random.choice([0, 1], size=(iinput.size(0), fc1_out_feat),
+                                        p = [drop_prob, 1-drop_prob]) 
+
         for i in range(steps):
             # conv layer 1
-            vmem_conv1 = vmem_conv1 + self.conv1(poisson_spk).int()
+            vmem_conv1 = vmem_conv1 + self.conv1(poisson_spk).int() * (mask_conv1 / (1 - drop_prob)) 
             vmem_conv1, spk = LIF_neuron(vmem_conv1)
+            total_out_conv1, leak_out_conv1, out_history_conv1 = layer_outputs(leak, spk, total_out_conv1, leak_out_conv1, out_history_conv1)
 
             # pooling layer 1
             vmem_pool1 = vmem_pool1 + self.avgpool1(spk)
             vmem_pool1, spk = pooling_neuron(vmem_pool1)
 
             # conv layer 2
-            vmem_conv2 = vmem_conv2 + self.conv2(spk)
+            vmem_conv2 = vmem_conv2 + self.conv2(spk) * (mask_conv2 / (1 - drop_prob)) 
             vmem_conv2, spk = LIF_neuron(vmem_conv2)
+            total_out_conv2, leak_out_conv2, out_history_conv2 = layer_outputs(leak, spk, total_out_conv2, leak_out_conv2, out_history_conv2)
+
 
             # pooling layer 2
             vmem_pool2 = vmem_pool2 + self.avgpool2(spk)
@@ -147,14 +184,18 @@ class Network(nn.Module):
             spk = spk.view(spk.size(0), -1)
 
             # fully-connected layer 1
-            vmem_fc1 = vmem_fc1 + self.fc1(spk)
+            vmem_fc1 = vmem_fc1 + self.fc1(spk) * (mask_fc1 / (1 - drop_prob)) 
             vmem_fc1, spk = LIF_neuron(vmem_fc1)
+            total_out_fc1, leak_out_fc1, out_history_fc1 = layer_outputs(leak, spk, total_out_fc1, leak_out_fc1, out_history_fc1)
+
 
             #fully_connected layer 2
             vmem_fc2 = vmem_fc2 + self.fc2(spk)
             vmem_fc2 = vmem_fc2.detach() * leak + vmem_fc2 - vmem_fc2.detach()
         
-        return vmem_fc2 / steps
+        return vmem_fc2 / steps, total_out_conv1, leak_out_conv1, out_history_conv1,
+        total_out_conv2, leak_out_conv2, out_history_conv2,
+        total_out_fc1, leak_out_fc1, out_history_fc1
 
 def train_steps(model, data, label, loss_fc, opt_fc):
     model.train()
@@ -188,46 +229,50 @@ loss_fc = torch.nn.CrossEntropyLoss()
 opt_fc = torch.optim.SGD(model.parameters(), lr=1e-3)
 
 #small test
-#iter_loader=iter(dataloader)
-#batch = next(iter_loader)
-#train_batch, train_labels = batch['train']
-#test_batch, test_labels = batch['test']
-#loss = 0
-#acc=0
-#for i in range(batch_size):
-#    tr_d = train_batch[1,:,:,:,:]
-#    tr_l = train_labels[i,:]
-#    te_d = test_batch[i,:,:,:,:]
-#    te_l = test_labels[i,:]
-#    loss = train_steps(model, tr_d, tr_l, loss_fc, opt_fc)
-#    acc = np.mean(calc_accuracy(model, te_d, te_l))
-#
-#    print('batch test #{}'.format(i))
-#    print('loss = {}'.format(loss))
-#    print('acc = {}'.format(acc))
+iter_loader=iter(dataloader)
+batch = next(iter_loader)
+train_batch, train_labels = batch['train']
+test_batch, test_labels = batch['test']
+loss = 0
+acc=0
+for i in range(batch_size):
+    tr_d = train_batch[1,:,:,:,:]
+    tr_l = train_labels[i,:]
+    te_d = test_batch[i,:,:,:,:]
+    te_l = test_labels[i,:]
+    loss = train_steps(model, tr_d, tr_l, loss_fc, opt_fc)
+    acc = np.mean(calc_accuracy(model, te_d, te_l))
+
+    print('batch test #{}'.format(i))
+    print('loss = {}'.format(loss))
+    print('acc = {}'.format(acc))
 
 # meta learning 
-cnt=0
-iter_loader=iter(dataloader)
-for cnt in range(100):
-    batch = next(iter_loader)
-    cnt += 1
-#for batch in dataloader:
-    train_batch, train_labels = batch['train']
-    test_batch, test_labels = batch['test']
-    loss = []
-    acc = []
-    for i in range(batch_size):
-        tr_d = train_batch[1,:,:,:,:]
-        tr_l = train_labels[i,:]
-        te_d = test_batch[i,:,:,:,:]
-        te_l = test_labels[i,:]
-        loss.append(train_steps(model, tr_d, tr_l, loss_fc, opt_fc).float())
-        acc.append(calc_accuracy(model, te_d, te_l))
-    batch_loss = torch.mean(torch.Tensor(loss))
-    batch_acc = torch.mean(torch.Tensor(acc))
-    cnt += 1
-    if cnt % 10 == 0:
-        print('batch #{}'.format(cnt))
-        print('loss = {}'.format(batch_loss))
-        print('acc = {}'.format(batch_acc))
+#cnt=0
+#iter_loader=iter(dataloader)
+#for cnt in range(100):
+#    batch = next(iter_loader)
+#    cnt += 1
+##for batch in dataloader:
+#    train_batch, train_labels = batch['train']
+#    test_batch, test_labels = batch['test']
+#    loss = []
+#    acc = []
+#    for i in range(batch_size):
+#        tr_d = train_batch[1,:,:,:,:]
+#        tr_l = train_labels[i,:]
+#        te_d = test_batch[i,:,:,:,:]
+#        te_l = test_labels[i,:]
+#        loss.append(train_steps(model, tr_d, tr_l, loss_fc, opt_fc).float())
+#        acc.append(calc_accuracy(model, te_d, te_l))
+#    batch_loss = torch.mean(torch.Tensor(loss))
+#    batch_acc = torch.mean(torch.Tensor(acc))
+#    cnt += 1
+#    with open('log.txt', 'w') as f:
+#        if cnt % 10 == 0:
+#            print('batch #{}'.format(cnt))
+#            print('loss = {}'.format(batch_loss))
+#            print('acc = {}'.format(batch_acc))
+#            f.write('batch #{}\n'.format(cnt))
+#            f.write('loss = {}\n'.format(batch_loss))
+#            f.write('loss = {}\n'.format(batch_loss))
