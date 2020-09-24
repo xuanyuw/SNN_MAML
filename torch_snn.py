@@ -54,6 +54,11 @@ weight_const = 2.0
 tau_mem = 100 # time-constant of membrane potential
 leak = np.exp(-(1 / tau_mem))
 
+# -----------------------------
+# Spiking network section
+# -----------------------------
+
+
 class Spike_generator(torch.autograd.Function):
     @staticmethod
     def forward(self, input):
@@ -132,19 +137,19 @@ class Network(nn.Module):
         vmem_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
         vmem_fc2 = Variable(torch.zeros(input.size(0), numcat))
 
-        total_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
-                             requires_grad=False)
-        leak_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
-                             requires_grad=False)
-        total_out_conv2 = Variable(torch.zeros(input.size(0), conv2_out_channel, int(img_size/pooling_size),
-                                          int(img_size/pooling_size)), requires_grad=False)
-        leak_out_conv2 = Variable(torch.zeros(input.size(0), conv2_out_channel, int(img_size/pooling_size),
-                                          int(img_size/pooling_size)), requires_grad=False)
-        total_out_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
-        leak_out_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
-        out_history_conv1 = []
-        out_history_conv2 = []
-        out_history_fc1 = []
+        #total_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
+        #                     requires_grad=False)
+        #leak_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
+        #                     requires_grad=False)
+        #total_out_conv2 = Variable(torch.zeros(input.size(0), conv2_out_channel, int(img_size/pooling_size),
+        #                                  int(img_size/pooling_size)), requires_grad=False)
+        #leak_out_conv2 = Variable(torch.zeros(input.size(0), conv2_out_channel, int(img_size/pooling_size),
+        #                                  int(img_size/pooling_size)), requires_grad=False)
+        #total_out_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
+        #leak_out_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
+        #out_history_conv1 = []
+        #out_history_conv2 = []
+        #out_history_fc1 = []
 
         #generate Poisson-distributed spikes
         rand_num = torch.rand(tuple(input.shape))
@@ -193,9 +198,28 @@ class Network(nn.Module):
             vmem_fc2 = vmem_fc2 + self.fc2(spk)
             vmem_fc2 = vmem_fc2.detach() * leak + vmem_fc2 - vmem_fc2.detach()
         
-        return vmem_fc2 / steps, total_out_conv1, leak_out_conv1, out_history_conv1,
-        total_out_conv2, leak_out_conv2, out_history_conv2,
-        total_out_fc1, leak_out_fc1, out_history_fc1
+        return vmem_fc2 / steps
+        #,total_out_conv1, leak_out_conv1, out_history_conv1,
+        #total_out_conv2, leak_out_conv2, out_history_conv2,
+        #total_out_fc1, leak_out_fc1, out_history_fc1
+
+# TODO: find a way to add manual bp
+
+# -----------------------------
+# Attention network section
+# -----------------------------
+
+class attention
+
+
+
+
+
+
+
+
+
+
 
 def train_steps(model, data, label, loss_fc, opt_fc):
     model.train()
