@@ -1,9 +1,11 @@
+
 import random
 import h5py
 import pickle
 import torch
+import io
 from math import floor
-from io import BytesIO
+import PIL.Image as Image
 from torchvision import transforms 
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler
 from tqdm import tqdm
@@ -17,24 +19,26 @@ def split_data(class_keys, pic_per_class, ways, support_shots, test_shots):
     support_labels = []
     test_labels = []
     print("separating labels")
+    
     for i in tqdm(range(n)):
         samp = random.sample(label_pool, k=ways)
         support_labels.append(samp)
         tsamp = random.choices(samp, k=test_shots)
         test_labels.append(tsamp)
-
     indx_pool = list(range(pic_per_class)) * len(class_keys)
     test_pool = list(range(pic_per_class)) * len(class_keys)
     support_indx = []
     test_indx = []
     print('separating indices')
     for j in tqdm(range(n)):
-        samp = random.sample(indx_pool, k=support_shots)
+        samp = random.sample(indx_pool, k=support_shots*ways)
         support_indx.append(samp)
         tsamp = random.choices(test_pool, k=test_shots)
+        test_indx.append(tsamp)
     return {'support': list(zip(support_labels, support_indx)), 'test':list(zip(test_labels, test_indx))}
 
 class DoubleMNIST(Dataset):
+    # structure: ('support: [([labels], tensor(images)), (...) ...], 'test': [(...), ...])
     def __init__(self, data_file, ways, support_shots, test_shots, is_paired_file=True):
         if is_paired_file:
             try:
@@ -53,99 +57,39 @@ class DoubleMNIST(Dataset):
             print('load up support sets')
             s_li = []
             for i in tqdm(indx_set['support']):
+            #for i in indx_set['support'][:10]:
                 support_li = ()
-                for j in range(len(i(1))):
-                    lb = i(0)[j]
-                    img = dset.get(lb)[i(1)[j]]
+                for j in range(len(i[1])):
+                    lb = i[0][j]
+                    img = dset.get(lb)[i[1][j]]
                     img = Image.open(io.BytesIO(img))
                     img_t = transforms.ToTensor()(img).unsqueeze_(0)
-                    support_img = support_img + (img_t)
+                    support_li = support_li + (img_t,)
                 support_imgs = torch.cat(support_li)
-                s_li.append((i(0), support_imgs))
+                s_li.append({'support':(i[0], support_imgs)})
             print('load up test sets')
-            t_li = []
-            for i in tqdm(indx_set['test']):
+            for i in tqdm(range(len(indx_set['test']))):
+            #for i in range(10):
                 test_li = ()
-                for j in range(len(i(1))):
-                    lb = i(0)[j]
-                    img = dset.get(lb)[i(1)[j]]
+                for j in range(len(indx_set['test'][i][0])):
+                    lb = indx_set['test'][i][0][j]
+                    img = dset.get(lb)[indx_set['test'][i][1][j]]
                     img = Image.open(io.BytesIO(img))
                     img_t = transforms.ToTensor()(img).unsqueeze_(0)
-                    test_img = support_img + (img_t)
+                    test_li = test_li + (img_t,)
                 test_imgs = torch.cat(test_li)
-                t_li.append((i(0), test_imgs))
-            self.samples = {'support':s_li, 'test: t_li'}
+                s_li[i].update({'test': (indx_set['test'][i][0], test_imgs)})
+    
+            self.samples = s_li
                     
-
     def __len__(self):
-        return len(self.samples['support'])
+        return len(self.samples)
 
     def __getitem__(self, idx):
-        return self.samples(idx)      
+        return self.samples[idx]      
 
+d = DoubleMNIST('data/doublemnist/train_data.hdf5', 5, 1, 1, False)
 
+samp = d[0]
 
-        
-
-
-
-
-#%%
-import h5py
-
-f = h5py.File('data/doublemnist/train_data.hdf5', 'r')
-list(f.keys())
-# %%
-dset = f['datasets']
-type(dset)
-# %%
-list(dset.keys())
-# %%
-it = iter(dset.items())
-grp = next(it)
-# %%
-grp[1][0]
-# %%
-import matplotlib.pyplot as plt
-plt.imshow(grp[1][0])
-# %%
-import numpy as np
-
-np.sqrt(544)
-# %%
-import io
-import PIL.Image as Image
-
-image = Image.open(io.BytesIO(grp[1][0]))
-from torchvision import transforms
-import torch
-
-for i in range(5):
-    t = t = transforms.ToTensor()(image)
-    t = torch.cat(t)
-
-print(t.shape)
-# %%
-dset.shape
-# %%
-grp[0]
-# %%
-len(grp[1])
-# %%
-dset.items()[0]
-# %%
-len(dset.get('30'))
-
-# %%
-testset = dset.get('30')[0]
-testset
-# %%
-t = [None]*10
-t[1].append((1, 2))
-t[2] = [(2, 3), (4, 5)]
-t
-# %%
-a = [['a', 'b'], ['c', 'd']]
-b = [[1, 2], [3, 4]]
-list(zip(a, b))
-# %%
+samp
