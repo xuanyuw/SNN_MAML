@@ -2,17 +2,18 @@ import argparse
 import torch
 from torch import nn
 from torch.autograd import Variable
+from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import numpy as np
-from torchmeta.datasets.helpers import doublemnist
-from torchmeta.utils.data import BatchMetaDataLoader
+import double_mnist_loader
 from torchvision.transforms import Grayscale, Compose, ToTensor
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--n_epochs', type=int,default=500)
 parser.add_argument('--batch_size', type=int,default=72)
 parser.add_argument('--n_ways', type=int,default=5)
-parser.add_argument('--n_shot', type=int,default=1)
+parser.add_argument('--support_shots', type=int, default=1)
+parser.add_argument('--test_shots', type=int, default = 5)
 parser.add_argument("--train", dest="train", action="store_true")
 parser.add_argument("--gpu", dest="gpu", action="store_true")
 parser.set_defaults(plot=False, gpu=False, train=True)
@@ -22,7 +23,8 @@ args = parser.parse_args()
 n_epochs = args.n_epochs
 batch_size = args.batch_size
 n_ways = args.n_ways
-n_shot = args.n_shot
+support_shots = args.support_shots
+test_shots = args.test_shots
 train = args.train
 gpu = args.gpu
 test_shots = 1
@@ -209,9 +211,37 @@ class Network(nn.Module):
 # Attention network section
 # -----------------------------
 
-class attention
+def get_cos_similarities(support_set, test_image):
+    #TODO: now only support test size = 0
+    similarities = []
+    for i in range(n_ways):
+        s_img = torch.gather(support_set, dim=0, index=i)
+        cos = nn.CosineSimilarity()
+        dist = cos(s_img, test_image)
+        similarities.append(dist)
+    out = torch.stack(similarities)
+    return out
 
+def calc_pred(similarities, support_labels):
+    softmax = nn.Softmax()
+    a = softmax(similarities)
+    preds = a.bmm(support_labels)
+    return preds
 
+class BiDirLSTM(nn.Module):
+    def __init__(self, input_size, batch_size, hidden_size=32, num_layers=2):
+        self.hidden_size = hidden_size
+        self.batch_size = batch_size
+        self.num_layers = num_layers
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, bidirectional=True)
+    def forward(self, input):
+        hidden_layers = ()
+        for i in range(self.num_layers):
+            h = torch.randn(self.num_layers * 2, self.batch_size, self.hidden_size)
+            hidden_layers = hidden_layers + (h,)
+        self.hidden = hidden_layers
+        output, self.hidden = self.lstm(input, self.hidden)
+        return output
 
 
 
@@ -242,11 +272,9 @@ def calc_accuracy(model, data, labels):
 
 
 #load dataset
-dataset = doublemnist("data", ways=n_ways, shots=n_shot, test_shots=test_shots,
-                        meta_train=True, transform=Compose([Grayscale(), ToTensor()]),
-                        download=True)
+train_dataset = DoubleMNIST('data/doublemnist/train_data.hdf5', n_ways, support_shots, test_shots, False, 'data/doublemnist/train_data_paired.pkl')
 
-dataloader = BatchMetaDataLoader(dataset, batch_size=batch_size, num_workers=4)
+dataloader = dataloader(dataset, batch_size=batch_size, num_workers=4)
 
 model = Network()
 loss_fc = torch.nn.CrossEntropyLoss()

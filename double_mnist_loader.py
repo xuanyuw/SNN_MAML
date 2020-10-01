@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 
 pic_per_class = 1000
+num_class = 100
 
 def split_data(class_keys, pic_per_class, ways, support_shots, test_shots):
     n = floor((len(class_keys) * pic_per_class) / ways)
@@ -35,19 +36,30 @@ def split_data(class_keys, pic_per_class, ways, support_shots, test_shots):
         support_indx.append(samp)
         tsamp = random.choices(test_pool, k=test_shots)
         test_indx.append(tsamp)
-    return {'support': list(zip(support_labels, support_indx)), 'test':list(zip(test_labels, test_indx))}
+    return {'support': list(zip(support_labels, support_indx)), 'test': list(zip(test_labels, test_indx))}
+
+def one_hot_label(total_class, labels):
+    lbs = []
+    for i in labels:
+        t = torch.zeros(total_class)
+        t[i] = 1
+        lbs.append(t)
+    oh_labels = torch.stack(lbs)
+    return oh_labels
 
 class DoubleMNIST(Dataset):
     # structure: ('support: [([labels], tensor(images)), (...) ...], 'test': [(...), ...])
-    def __init__(self, data_file, ways, support_shots, test_shots, is_paired_file=True):
+    def __init__(self, data_file, ways, support_shots, test_shots, is_paired_file=True, pk_name=None):
         if is_paired_file:
             try:
-                self.samples = pickle.load(data_file)
+                with open(data_file, 'rb') as f:
+                    self.samples = pickle.load(f)
             except pickle.PickleError:
                 print('The file must be pickled first, please change is_paired_file to True and try again')
         else:
             if not h5py.is_hdf5(data_file):
-                raise ValueError('Not a hdf5 file')    
+                raise ValueError('Not a hdf5 file')
+            assert pk_name==None, 'pk_name is needed when is_paired_file is False'    
             self.paires = []
             self.samples = []
             f = h5py.File(data_file)
@@ -56,8 +68,8 @@ class DoubleMNIST(Dataset):
             indx_set = split_data(keys, pic_per_class, ways, support_shots, test_shots)
             print('load up support sets')
             s_li = []
-            for i in tqdm(indx_set['support']):
-            #for i in indx_set['support'][:10]:
+            #for i in tqdm(indx_set['support']):
+            for i in indx_set['support'][:10]:
                 support_li = ()
                 for j in range(len(i[1])):
                     lb = i[0][j]
@@ -66,10 +78,10 @@ class DoubleMNIST(Dataset):
                     img_t = transforms.ToTensor()(img).unsqueeze_(0)
                     support_li = support_li + (img_t,)
                 support_imgs = torch.cat(support_li)
-                s_li.append({'support':(i[0], support_imgs)})
+                s_li.append({'support':(one_hot_label(num_class, i[0]), support_imgs)})
             print('load up test sets')
-            for i in tqdm(range(len(indx_set['test']))):
-            #for i in range(10):
+            #for i in tqdm(range(len(indx_set['test']))):
+            for i in range(10):
                 test_li = ()
                 for j in range(len(indx_set['test'][i][0])):
                     lb = indx_set['test'][i][0][j]
@@ -78,9 +90,10 @@ class DoubleMNIST(Dataset):
                     img_t = transforms.ToTensor()(img).unsqueeze_(0)
                     test_li = test_li + (img_t,)
                 test_imgs = torch.cat(test_li)
-                s_li[i].update({'test': (indx_set['test'][i][0], test_imgs)})
-    
+                s_li[i].update({'test': (one_hot_label(num_class, indx_set['test'][i][0]), test_imgs)})    
             self.samples = s_li
+            with open(pk_name, 'wb') as f:
+                pickle.dump(s_li, f)
                     
     def __len__(self):
         return len(self.samples)
@@ -88,8 +101,3 @@ class DoubleMNIST(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx]      
 
-d = DoubleMNIST('data/doublemnist/train_data.hdf5', 5, 1, 1, False)
-
-samp = d[0]
-
-samp
