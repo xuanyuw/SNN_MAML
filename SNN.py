@@ -1,39 +1,19 @@
-import argparse
+# -----------------------------
+# Spiking network section
+# -----------------------------
+# Adapted from https://github.com/chan8972/Enabling_Spikebased_Backpropagation/blob/master/src/mnist_LeNet.py
+
 import torch
 from torch import nn
 from torch.autograd import Variable
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
 import numpy as np
-import double_mnist_loader
-from torchvision.transforms import Grayscale, Compose, ToTensor
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--n_epochs', type=int,default=500)
-parser.add_argument('--batch_size', type=int,default=72)
-parser.add_argument('--n_ways', type=int,default=5)
-parser.add_argument('--support_shots', type=int, default=1)
-parser.add_argument('--test_shots', type=int, default = 5)
-parser.add_argument("--train", dest="train", action="store_true")
-parser.add_argument("--gpu", dest="gpu", action="store_true")
-parser.set_defaults(plot=False, gpu=False, train=True)
 
-args = parser.parse_args()
-
-n_epochs = args.n_epochs
-batch_size = args.batch_size
-n_ways = args.n_ways
-support_shots = args.support_shots
-test_shots = args.test_shots
-train = args.train
-gpu = args.gpu
-test_shots = 1
-
-torch.manual_seed(0)
-if gpu & torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
+#torch.manual_seed(0)
+#if gpu & torch.cuda.is_available():
+#    device = torch.device('cuda')
+#else:
+#    device = torch.device('cpu')
 
 # feat for 4-layer structure
 img_size = 64
@@ -55,11 +35,6 @@ pooling_threshold = 0.75
 weight_const = 2.0
 tau_mem = 100 # time-constant of membrane potential
 leak = np.exp(-(1 / tau_mem))
-
-# -----------------------------
-# Spiking network section
-# -----------------------------
-
 
 class Spike_generator(torch.autograd.Function):
     @staticmethod
@@ -102,7 +77,7 @@ def layer_outputs(leak, out, total_out, leak_out, out_history):
 
 
 class Network(nn.Module):
-    def __init__(self, n_ways=n_ways, img_size=img_size):
+    def __init__(self, img_size=img_size):
         super(Network, self).__init__()
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=conv1_out_channel, kernel_size=kernel_size, 
                               stride=conv_stride, padding=padding, bias=False)
@@ -165,7 +140,7 @@ class Network(nn.Module):
         mask_conv2 = np.random.choice([0, 1], size=(input.size(0), conv1_out_channel,
                                                     int(img_size/pooling_size), int(img_size/pooling_size)),
                                         p=[drop_prob, 1 - drop_prob])
-        mask_fc1 = np.random.choice([0, 1], size=(iinput.size(0), fc1_out_feat),
+        mask_fc1 = np.random.choice([0, 1], size=(input.size(0), fc1_out_feat),
                                         p = [drop_prob, 1-drop_prob]) 
 
         for i in range(steps):
@@ -206,125 +181,3 @@ class Network(nn.Module):
         #total_out_fc1, leak_out_fc1, out_history_fc1
 
 # TODO: find a way to add manual bp
-
-# -----------------------------
-# Attention network section
-# -----------------------------
-
-def get_cos_similarities(support_set, test_image):
-    #TODO: now only support test size = 0
-    similarities = []
-    for i in range(n_ways):
-        s_img = torch.gather(support_set, dim=0, index=i)
-        cos = nn.CosineSimilarity()
-        dist = cos(s_img, test_image)
-        similarities.append(dist)
-    out = torch.stack(similarities)
-    return out
-
-def calc_pred(similarities, support_labels):
-    softmax = nn.Softmax()
-    a = softmax(similarities)
-    preds = a.bmm(support_labels)
-    return preds
-
-class BiDirLSTM(nn.Module):
-    def __init__(self, input_size, batch_size, hidden_size=32, num_layers=2):
-        self.hidden_size = hidden_size
-        self.batch_size = batch_size
-        self.num_layers = num_layers
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, bidirectional=True)
-    def forward(self, input):
-        hidden_layers = ()
-        for i in range(self.num_layers):
-            h = torch.randn(self.num_layers * 2, self.batch_size, self.hidden_size)
-            hidden_layers = hidden_layers + (h,)
-        self.hidden = hidden_layers
-        output, self.hidden = self.lstm(input, self.hidden)
-        return output
-
-
-
-
-
-
-
-
-
-def train_steps(model, data, label, loss_fc, opt_fc):
-    model.train()
-    model.zero_grad()
-    opt_fc.zero_grad()
-    pred = model(data)
-    loss = loss_fc(pred, label)
-    loss.backward()
-    opt_fc.step()
-    return loss
-
-def calc_accuracy(model, data, labels):
-    model.eval()
-    acc = []
-    for i in range(len(labels)):
-        x = data[i,:,:,:]
-        x = x.unsqueeze(0)
-        acc.append((model(x).argmax(axis=1) == labels[i]).float().numpy())
-    return acc
-
-
-#load dataset
-train_dataset = DoubleMNIST('data/doublemnist/train_data.hdf5', n_ways, support_shots, test_shots, False, 'data/doublemnist/train_data_paired.pkl')
-
-dataloader = dataloader(dataset, batch_size=batch_size, num_workers=4)
-
-model = Network()
-loss_fc = torch.nn.CrossEntropyLoss()
-opt_fc = torch.optim.SGD(model.parameters(), lr=1e-3)
-
-#small test
-iter_loader=iter(dataloader)
-batch = next(iter_loader)
-train_batch, train_labels = batch['train']
-test_batch, test_labels = batch['test']
-loss = 0
-acc=0
-for i in range(batch_size):
-    tr_d = train_batch[1,:,:,:,:]
-    tr_l = train_labels[i,:]
-    te_d = test_batch[i,:,:,:,:]
-    te_l = test_labels[i,:]
-    loss = train_steps(model, tr_d, tr_l, loss_fc, opt_fc)
-    acc = np.mean(calc_accuracy(model, te_d, te_l))
-
-    print('batch test #{}'.format(i))
-    print('loss = {}'.format(loss))
-    print('acc = {}'.format(acc))
-
-# meta learning 
-#cnt=0
-#iter_loader=iter(dataloader)
-#for cnt in range(100):
-#    batch = next(iter_loader)
-#    cnt += 1
-##for batch in dataloader:
-#    train_batch, train_labels = batch['train']
-#    test_batch, test_labels = batch['test']
-#    loss = []
-#    acc = []
-#    for i in range(batch_size):
-#        tr_d = train_batch[1,:,:,:,:]
-#        tr_l = train_labels[i,:]
-#        te_d = test_batch[i,:,:,:,:]
-#        te_l = test_labels[i,:]
-#        loss.append(train_steps(model, tr_d, tr_l, loss_fc, opt_fc).float())
-#        acc.append(calc_accuracy(model, te_d, te_l))
-#    batch_loss = torch.mean(torch.Tensor(loss))
-#    batch_acc = torch.mean(torch.Tensor(acc))
-#    cnt += 1
-#    with open('log.txt', 'w') as f:
-#        if cnt % 10 == 0:
-#            print('batch #{}'.format(cnt))
-#            print('loss = {}'.format(batch_loss))
-#            print('acc = {}'.format(batch_acc))
-#            f.write('batch #{}\n'.format(cnt))
-#            f.write('loss = {}\n'.format(batch_loss))
-#            f.write('loss = {}\n'.format(batch_loss))

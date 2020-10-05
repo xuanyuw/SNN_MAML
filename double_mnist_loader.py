@@ -1,3 +1,6 @@
+# -----------------------------
+# Transform original dataset
+# -----------------------------
 
 import random
 import h5py
@@ -41,14 +44,15 @@ def split_data(class_keys, pic_per_class, ways, support_shots, test_shots):
 def one_hot_label(total_class, labels):
     lbs = []
     for i in labels:
+        l = int(i)
         t = torch.zeros(total_class)
-        t[i] = 1
+        t[l] = 1
         lbs.append(t)
     oh_labels = torch.stack(lbs)
     return oh_labels
 
 class DoubleMNIST(Dataset):
-    # structure: ('support: [([labels], tensor(images)), (...) ...], 'test': [(...), ...])
+    # structure: ([{'support':([lbl(one hot)...], tensor(imgs)), 'test': (lbl(one hot), img)}....])
     def __init__(self, data_file, ways, support_shots, test_shots, is_paired_file=True, pk_name=None):
         if is_paired_file:
             try:
@@ -59,7 +63,7 @@ class DoubleMNIST(Dataset):
         else:
             if not h5py.is_hdf5(data_file):
                 raise ValueError('Not a hdf5 file')
-            assert pk_name==None, 'pk_name is needed when is_paired_file is False'    
+            assert pk_name!=None, 'pk_name is needed when is_paired_file is False'    
             self.paires = []
             self.samples = []
             f = h5py.File(data_file)
@@ -100,4 +104,3 @@ class DoubleMNIST(Dataset):
 
     def __getitem__(self, idx):
         return self.samples[idx]      
-
