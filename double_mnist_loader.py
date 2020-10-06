@@ -53,7 +53,7 @@ def one_hot_label(total_class, labels):
 
 class DoubleMNIST(Dataset):
     # structure: ([{'support':([lbl(one hot)...], tensor(imgs)), 'test': (lbl(one hot), img)}....])
-    def __init__(self, data_file, ways, support_shots, test_shots, is_paired_file=True, pk_name=None):
+    def __init__(self, data_file, ways=None, support_shots=None, test_shots=None, is_paired_file=True, pk_name=None):
         if is_paired_file:
             try:
                 with open(data_file, 'rb') as f:
@@ -63,7 +63,10 @@ class DoubleMNIST(Dataset):
         else:
             if not h5py.is_hdf5(data_file):
                 raise ValueError('Not a hdf5 file')
-            assert pk_name!=None, 'pk_name is needed when is_paired_file is False'    
+            assert pk_name != None, 'pk_name is needed when is_paired_file is False'
+            assert ways != None, 'ways is needed when is_paired_file is False'
+            assert support_shots != None, 'support_shots is needed when is_paired_file is False'
+            assert test_shots != None, 'test_shots is needed when is_paired_file is False'
             self.paires = []
             self.samples = []
             f = h5py.File(data_file)

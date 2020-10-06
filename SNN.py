@@ -114,6 +114,8 @@ class Network(nn.Module):
         vmem_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
         vmem_fc2 = Variable(torch.zeros(input.size(0), numcat))
 
+        self.out_size = vmem_fc2.size()
+
         #total_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
         #                     requires_grad=False)
         #leak_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 

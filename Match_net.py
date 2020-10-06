@@ -26,12 +26,13 @@ def calc_pred(similarities, support_labels):
     return preds
 
 class BiDirLSTM(nn.Module):
-    def __init__(self, input_size, batch_size, hidden_size=32, num_layers=2):
+    def __init__(self, batch_size, vector_dim, hidden_size=32, num_layers=2):
         super(BiDirLSTM, self).__init__()
         self.hidden_size = hidden_size
         self.batch_size = batch_size
         self.num_layers = num_layers
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, bidirectional=True)
+        self.vector_dim = vector_dim
+        self.lstm = nn.LSTM(input_size=vector_dim, hidden_size=hidden_size, num_layers=num_layers, bidirectional=True)
     def forward(self, input):
         hidden_layers = ()
         for i in range(self.num_layers):
@@ -42,12 +43,11 @@ class BiDirLSTM(nn.Module):
         return output
 
 class Matching_Network(nn.Module):
-    def __init__(self, input_size, batch_size):
+    def __init__(self, batch_size, encoder):
         super(Matching_Network, self).__init__()
-        self.input_size = input_size
         self.batch_size = batch_size
-        self.encoder = Network()
-        self.bdlstm = BiDirLSTM(input_size, batch_size)
+        self.encoder = encoder
+        self.bdlstm = BiDirLSTM(batch_size, vector_dim=encoder.out_size)
     def forward(self, support_imgs, support_lbls, target_img):
         # encode both support images and the target image
         s_set = self.encoder(support_imgs)
