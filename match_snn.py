@@ -31,14 +31,14 @@ from double_mnist_loader import *
 #gpu = args.gpu
 #test_shots = 1
 
+#TODO: how to back prop?!?!?!
+train_set = double_mnist_loader.DoubleMNIST('paired_train.pkl')
+val_set = double_mnist_loader.DoubleMNIST('paired_val.pkl')
 
-train = double_mnist_loader.DoubleMNIST('paired_train.pkl')
-val = double_mnist_loader.DoubleMNIST('paired_val.pkl')
-
-train_loader = DataLoader(train, batch_size=2, shuffle=True, sampler=RandomSampler)
-val_loader = DataLoader(train, batch_size=2, shuffle=True, sampler=RandomSampler)
+train_loader = DataLoader(train_set, batch_size=2, shuffle=True, sampler=RandomSampler)
+val_loader = DataLoader(val_set, batch_size=2, shuffle=True, sampler=RandomSampler)
 loss_fn = nn.MSELoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, weight_decay=5e-4)
+
 
 def train():
     mnet = Matching_Network(2, Network())
@@ -52,8 +52,6 @@ def train():
         pred = mnet(support_imgs, support_lbls, target_img)
         loss = loss_fn(pred, target_lbl)
         loss.backward()
-        optimizer.zero_grad() 
-        optimizer.step()
     
 
         
