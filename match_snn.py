@@ -7,9 +7,10 @@ import torch.nn.functional as F
 import numpy as np
 import double_mnist_loader
 from torchvision.transforms import Grayscale, Compose, ToTensor
-from Match_net import *
-from SNN import *
-from double_mnist_loader import *
+from tqdm import tqdm
+import SNN
+import double_mnist_loader
+import Match_net
 
 #parser = argparse.ArgumentParser()
 #parser.add_argument('--n_epochs', type=int,default=500)
@@ -32,29 +33,34 @@ from double_mnist_loader import *
 #test_shots = 1
 
 #TODO: how to back prop?!?!?!
+#TODO: fix loader structure batch*ways--> ways so that batch_size=ways
 train_set = double_mnist_loader.DoubleMNIST('paired_train.pkl')
 val_set = double_mnist_loader.DoubleMNIST('paired_val.pkl')
+batch_size = 1
 
-train_loader = DataLoader(train_set, batch_size=2, shuffle=True, sampler=RandomSampler)
-val_loader = DataLoader(val_set, batch_size=2, shuffle=True, sampler=RandomSampler)
-loss_fn = nn.MSELoss()
+train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=True)
+loss_fn = nn.CrossEntropyLoss()
+
 
 
 def train():
-    mnet = Matching_Network(2, Network())
-    mnet.train()
-    for i in train_loader:
-        #TODO: fix batch thing
-        support_imgs = i['support'][1]
-        target_img = i['test'][1]
-        support_lbls = i['support'][0]
-        target_lbl = i['test'][0]
+    encoder = SNN.Network(batch_size)
+    #TODO: change magic num 5 to batch_size
+    mnet = Match_net.Matching_Network(5, encoder)
+    for i in tqdm(train_loader):
+        support_imgs = i['support'][1].squeeze(0)
+        target_img = i['test'][1].squeeze(0)
+        support_lbls = i['support'][0].squeeze(0)
+        target_lbl = i['test'][0].squeeze(0)
         pred = mnet(support_imgs, support_lbls, target_img)
+        optimizer = torch.optim.Adam([pred])
         loss = loss_fn(pred, target_lbl)
-        loss.backward()
-    
+        acc = sum(torch.eq(target_lbl,pred))/len(pred)
+        print('acc=%d, loss=%d' %(acc, loss))
+        #optimizer.zero_grad()
+        #loss.backward()
+        #optimizer.step()
 
-        
-
-
+train()
 

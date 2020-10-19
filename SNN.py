@@ -75,10 +75,10 @@ def layer_outputs(leak, out, total_out, leak_out, out_history):
     out_history.append(out)
     return total_out, leak_out, out_history
 
-
 class Network(nn.Module):
-    def __init__(self, img_size=img_size):
+    def __init__(self, batch_size):
         super(Network, self).__init__()
+        self.net_out_size = fc1_out_feat
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=conv1_out_channel, kernel_size=kernel_size, 
                               stride=conv_stride, padding=padding, bias=False)
         self.avgpool1 = nn.AvgPool2d(kernel_size=pooling_size, stride=pooling_stride)
@@ -102,6 +102,9 @@ class Network(nn.Module):
                 m.weight.data.normal_(0.0, np.sqrt(weight_const/fan_in))
                 m.threshold = conv_threshold
 
+    def get_out_size(self):
+        return self.net_out_size
+
     def forward(self, input, steps=tau_mem, leak=leak):
         vmem_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
                              requires_grad=False)
@@ -113,8 +116,6 @@ class Network(nn.Module):
                                           requires_grad=False)
         vmem_fc1 = Variable(torch.zeros(input.size(0), fc1_out_feat), requires_grad=False)
         vmem_fc2 = Variable(torch.zeros(input.size(0), numcat))
-
-        self.out_size = vmem_fc2.size()
 
         #total_out_conv1 = Variable(torch.zeros(input.size(0), conv1_out_channel, img_size, img_size), 
         #                     requires_grad=False)
@@ -137,19 +138,19 @@ class Network(nn.Module):
 
         # masks for drop-out
         drop_prob = 0.2
-        mask_conv1 = np.random.choice([0, 1], size=(input.size(0), conv1_out_channel, img_size, img_size),
-                                        p = [drop_prob, 1-drop_prob])
-        mask_conv2 = np.random.choice([0, 1], size=(input.size(0), conv1_out_channel,
+        mask_conv1 = Variable(torch.from_numpy(np.random.choice([0, 1], size=(input.size(0), conv1_out_channel, img_size, img_size),
+                                        p = [drop_prob, 1-drop_prob])), requires_grad=False)
+        mask_conv2 = Variable(torch.from_numpy(np.random.choice([0, 1], size=(input.size(0), conv2_out_channel,
                                                     int(img_size/pooling_size), int(img_size/pooling_size)),
-                                        p=[drop_prob, 1 - drop_prob])
-        mask_fc1 = np.random.choice([0, 1], size=(input.size(0), fc1_out_feat),
-                                        p = [drop_prob, 1-drop_prob]) 
+                                        p=[drop_prob, 1 - drop_prob])), requires_grad=False)
+        mask_fc1 = Variable(torch.from_numpy(np.random.choice([0, 1], size=(input.size(0), fc1_out_feat),
+                                        p = [drop_prob, 1-drop_prob])), requires_grad=False)
 
         for i in range(steps):
             # conv layer 1
             vmem_conv1 = vmem_conv1 + self.conv1(poisson_spk).int() * (mask_conv1 / (1 - drop_prob)) 
             vmem_conv1, spk = LIF_neuron(vmem_conv1)
-            total_out_conv1, leak_out_conv1, out_history_conv1 = layer_outputs(leak, spk, total_out_conv1, leak_out_conv1, out_history_conv1)
+    #        total_out_conv1, leak_out_conv1, out_history_conv1 = layer_outputs(leak, spk, total_out_conv1, leak_out_conv1, out_history_conv1)
 
             # pooling layer 1
             vmem_pool1 = vmem_pool1 + self.avgpool1(spk)
@@ -158,7 +159,7 @@ class Network(nn.Module):
             # conv layer 2
             vmem_conv2 = vmem_conv2 + self.conv2(spk) * (mask_conv2 / (1 - drop_prob)) 
             vmem_conv2, spk = LIF_neuron(vmem_conv2)
-            total_out_conv2, leak_out_conv2, out_history_conv2 = layer_outputs(leak, spk, total_out_conv2, leak_out_conv2, out_history_conv2)
+    #        total_out_conv2, leak_out_conv2, out_history_conv2 = layer_outputs(leak, spk, total_out_conv2, leak_out_conv2, out_history_conv2)
 
 
             # pooling layer 2
@@ -166,18 +167,19 @@ class Network(nn.Module):
             vmem_pool2, spk = pooling_neuron(vmem_pool2)
             
             spk = spk.view(spk.size(0), -1)
-
             # fully-connected layer 1
             vmem_fc1 = vmem_fc1 + self.fc1(spk) * (mask_fc1 / (1 - drop_prob)) 
             vmem_fc1, spk = LIF_neuron(vmem_fc1)
-            total_out_fc1, leak_out_fc1, out_history_fc1 = layer_outputs(leak, spk, total_out_fc1, leak_out_fc1, out_history_fc1)
+            #total_out_fc1, leak_out_fc1, out_history_fc1 = layer_outputs(leak, spk, total_out_fc1, leak_out_fc1, out_history_fc1)
+
+            return vmem_fc1
 
 
-            #fully_connected layer 2
-            vmem_fc2 = vmem_fc2 + self.fc2(spk)
-            vmem_fc2 = vmem_fc2.detach() * leak + vmem_fc2 - vmem_fc2.detach()
-        
-        return vmem_fc2 / steps
+        #    #fully_connected layer 2
+        #    vmem_fc2 = vmem_fc2 + self.fc2(spk)
+        #    vmem_fc2 = vmem_fc2.detach() * leak + vmem_fc2 - vmem_fc2.detach()
+        #
+        #return vmem_fc2 / steps
         #,total_out_conv1, leak_out_conv1, out_history_conv1,
         #total_out_conv2, leak_out_conv2, out_history_conv2,
         #total_out_fc1, leak_out_fc1, out_history_fc1
